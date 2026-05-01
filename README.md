@@ -82,24 +82,24 @@ Type a question into the question box and click **Ask**.
 Example questions:
 
 ```text
-What course should I take if I am interested in embedded systems?
-```
-
-```text
 Which courses are related to signal processing?
 ```
 
 ```text
-What classes would help with machine learning?
+I am very interested in circuit design and architecture. Which classes should I take?
 ```
 
-After clicking **Ask**, the response may take a few seconds to appear. Please wait for the answer to load.
+```text
+What are some introductory level courses that I should take?
+```
+
+After clicking **Ask**, the response may take 30-60 seconds to appear. Please wait for the answer to load. Since we are using a free API, it may take longer than expected.
 
 ### 3. Review the answer and records
 
 After the answer is generated, the app displays the response along with the relevant records used for reference.
 
-The records section is included so users can see what information the system used to help generate the answer.
+The records section is included for demo purposes so that you can see what information the system used to help generate the answer.
 
 ### 4. Provide thumbs-up or thumbs-down feedback
 
@@ -121,6 +121,19 @@ This file can be accessed in the project folder and represents part of the appâ€
 ### 5. Submit department feedback
 
 After the thumbs-up/thumbs-down section, scroll further down to write feedback for the ECE department.
+Example feedback to submit:
+
+```text
+I hate how fast ECE 210 is paced
+```
+
+```text
+I think that the ECE 313 professors do a great job of teaching the course
+```
+
+```text
+Can we please restock the vending machines on the first floor?
+```
 
 When a user submits written department feedback, the app saves both the feedback and its predicted sentiment into an Excel file.
 
@@ -148,7 +161,7 @@ The sentiment analysis helps classify student feedback so that the department ca
 - The API key should never be committed to GitHub.
 - The sentiment model script must be run before starting the app.
 - The ECE courses JSON file must be uploaded through the file upload box before asking questions.
-- AI responses may take a few seconds to appear after clicking **Ask**.
+- AI responses may take 30-60 seconds to appear after clicking **Ask**.
 - Users should scroll below the records section after receiving a response to provide thumbs-up/thumbs-down feedback.
 - In this implementation, record weighting only applies downweights after negative feedback.
 - Written department feedback is saved with sentiment results in an Excel file.
