@@ -19,6 +19,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 LABEL_MAP = {0: "negative", 1: "neutral", 2: "positive"}
 
+# Helper to break large text blobs into overlapping chunks so TF-IDF doesn't miss context
 def chunk_text(text, chunk_size=700, overlap=120):
     chunks = []
     start = 0
@@ -33,6 +34,7 @@ def chunk_text(text, chunk_size=700, overlap=120):
         start = end - overlap
     return chunks
 
+# Parses the uploaded dataset based on file extension
 def load_items_from_file(file_path):
     ext = os.path.splitext(file_path)[1].lower()
 
@@ -48,6 +50,7 @@ def load_items_from_file(file_path):
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         
+        # Flatten json into a list of strings for the vectorizer
         if isinstance(data, list):
             items = []
             for item in data:
@@ -66,8 +69,9 @@ def load_items_from_file(file_path):
 
     raise ValueError("Unsupported file type. Please upload CSV, XLSX, JSON, or TXT.")
 
-# FAQ Weighting system
-# Uses alpha/beta counters. Only penalizes bad responses on negative feedback.
+# FAQ Weighting System
+# We use downweights only based on alpha/beta counters. 
+# Positive feedback does nothing, negative feedback increments beta to slowly penalize bad docs.
 
 def item_id(text):
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
@@ -82,6 +86,7 @@ def save_faq_state(state):
     with open(FAQ_STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, sort_keys=True)
 
+# Weight = alpha / (alpha + beta)
 def get_weight(state, iid):
     entry = state.get(iid, {"alpha": 1, "beta": 1})
     return entry["alpha"] / (entry["alpha"] + entry["beta"])
@@ -95,6 +100,7 @@ def update_weight(state, iid, positive):
     save_faq_state(state)
     return entry
 
+# Cache the vectorizer state so we don't re-fit on every single user question
 _INDEX = {"file_path": None, "items": None, "ids": None, "vectorizer": None, "matrix": None}
 
 def build_or_get_index(file_path):
@@ -104,6 +110,7 @@ def build_or_get_index(file_path):
     items = load_items_from_file(file_path)
     items = [i for i in items if str(i).strip()]
     
+    # Cap set to 20k to ensure we don't truncate the bottom half of the course catalog
     if len(items) > 20000:
         items = items[:20000]
 
@@ -126,13 +133,13 @@ def retrieve(file_path, question, top_k=4):
     if not items or vectorizer is None:
         return []
 
+    # Get raw cosine similarity
     q_vec = vectorizer.transform([question])
     sims = cosine_similarity(q_vec, matrix).flatten()
 
+    # Blend TF-IDF similarity with our historical user feedback weights
     state = load_faq_state()
     weights = [get_weight(state, iid) for iid in ids]
-    
-    # Combine TF-IDF sim with our historical weight prior
     final_scores = sims * weights 
 
     top_idx = final_scores.argsort()[-top_k:][::-1]
@@ -148,9 +155,9 @@ def call_openrouter(question, retrieved):
     )
 
     sys_prompt = (
-        "You are a helpful assistant for the UIUC Electrical and Computer Engineering (ECE) department. "
+        "You are a helpful, conversational academic assistant for the UIUC Electrical and Computer Engineering (ECE) department. "
         "Use the retrieved records to answer the student's question. If the answer is not supported by the records, "
-        "say that clearly. Synthesize the information rather than just listing record numbers."
+        "say that clearly. Synthesize the information naturally rather than just listing record numbers."
     )
 
     user_prompt = (
@@ -159,7 +166,7 @@ def call_openrouter(question, retrieved):
         "Instructions:\n"
         "- Answer using only the retrieved records.\n"
         "- If multiple records support the answer, mention them.\n"
-        "- If records are insufficient, state it.\n"
+        "- If records are insufficient, state it clearly.\n"
         "- When asked about faculty names, return the 'name:' field accurately."
     )
 
@@ -181,6 +188,8 @@ def call_openrouter(question, retrieved):
     except Exception as e:
         return f"Model API error: {e}"
 
+# Sentiment Analysis
+
 def load_sentiment_model():
     if SENTIMENT_MODEL_PATH.exists():
         try:
@@ -198,6 +207,8 @@ def classify_sentiment(text):
     probs = _SENTIMENT_PIPELINE.predict_proba([text])[0]
     label_idx = int(probs.argmax())
     
+    # Custom polarity metric: P(positive) + 0.5 * P(neutral)
+    # Reduces false positives/negatives for marginal comments
     polarity = float(probs[2]) + 0.5 * float(probs[1])
     return {"label": LABEL_MAP[label_idx], "polarity": polarity}
 
@@ -221,6 +232,8 @@ def append_feedback_to_xlsx(session_id, raw_feedback, sentiment):
 def get_session_id():
     return hashlib.sha1(str(datetime.datetime.now().timestamp()).encode()).hexdigest()[:8]
 
+# UI Event Handlers
+
 def handle_ask(file_path, question, session_id):
     if not session_id:
         session_id = get_session_id()
@@ -230,6 +243,7 @@ def handle_ask(file_path, question, session_id):
         return "Please enter a question.", "", [], session_id
 
     try:
+        # Pull 10 to give the LLM enough context if chunks are heavily split (e.g. by section)
         retrieved = retrieve(file_path, question, top_k=10)
     except Exception as e:
         return f"Retrieval failed: {e}", "", [], session_id
@@ -246,6 +260,7 @@ def handle_ask(file_path, question, session_id):
     
     output_md = f"## Answer\n{answer}\n\n---\n## Supporting Context\n{supporting}"
     
+    # Save the top retrieved doc so we know what to penalize if the user clicks "No"
     top_record = [{"id": retrieved[0][0], "preview": retrieved[0][1][:120]}]
     return output_md, "", top_record, session_id
 
@@ -274,6 +289,8 @@ def handle_feedback(feedback_text, session_id):
     append_feedback_to_xlsx(session_id, feedback_text.strip(), sentiment)
     
     return f"Saved to ece_feedback.xlsx. \n\nPredicted sentiment: {sentiment['label']}", session_id
+
+# Gradio Frontend
 
 with gr.Blocks(title="UIUC ECE Chatbot") as demo:
     gr.Markdown("# UIUC ECE Chatbot\nUpload your dataset, ask questions, and leave feedback.")
